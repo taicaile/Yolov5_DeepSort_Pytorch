@@ -42,7 +42,7 @@ def compute_color_for_labels(label):
     return tuple(color)
 
 def get_optimal_font_scale(minwidth):
-    return max(minwidth/75, 0.5)
+    return max(minwidth/75, 0.75)
 
 def draw_boxes(img, bbox, identities=None, offset=(0, 0), classes_names=None):
     for i, box in enumerate(bbox):
