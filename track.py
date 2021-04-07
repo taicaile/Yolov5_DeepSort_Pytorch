@@ -42,7 +42,7 @@ def compute_color_for_labels(label):
     return tuple(color)
 
 
-def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
+def draw_boxes(img, bbox, identities=None, offset=(0, 0), classes_names=None):
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
@@ -52,7 +52,8 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0)):
         # box text and bar
         id = int(identities[i]) if identities is not None else 0
         color = compute_color_for_labels(id)
-        label = '{}{:d}'.format("", id)
+        cls_name = classes_names[i] if classes_names else ''
+        label = '{}{:d}'.format(cls_name, id)
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
         cv2.rectangle(
@@ -152,25 +153,30 @@ def detect(opt, save_img=False):
 
                 bbox_xywh = []
                 confs = []
-
+                classes = []
                 # Adapt detections to deep sort input format
                 for *xyxy, conf, cls in det:
                     x_c, y_c, bbox_w, bbox_h = bbox_rel(*xyxy)
                     obj = [x_c, y_c, bbox_w, bbox_h]
                     bbox_xywh.append(obj)
                     confs.append([conf.item()])
+                    classes.append(cls.item())
 
                 xywhs = torch.Tensor(bbox_xywh)
                 confss = torch.Tensor(confs)
 
                 # Pass detections to deepsort
-                outputs = deepsort.update(xywhs, confss, im0)
+                # [x1, y1, x2, y2, track_id]
+                outputs = deepsort.update(xywhs, confss, classes, im0)
 
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
-                    identities = outputs[:, -1]
-                    draw_boxes(im0, bbox_xyxy, identities)
+                    # track id
+                    identities = outputs[:, -2]
+                    classes = outputs[:, -1]
+                    classes_names = [names[int(cls)] for cls in classes] if names else None
+                    draw_boxes(im0, bbox_xyxy, identities, classes_names=classes_names)
 
                 # Write MOT compliant results to file
                 if save_txt and len(outputs) != 0:

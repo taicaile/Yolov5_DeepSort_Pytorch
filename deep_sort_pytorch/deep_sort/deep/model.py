@@ -94,6 +94,8 @@ class Net(nn.Module):
         x = x.view(x.size(0), -1)
         # B x 128
         if self.reid:
+            # 当目前的模型用于重识别的时候，返回单位向量
+            # x.shape = 512
             x = x.div(x.norm(p=2, dim=1, keepdim=True))
             return x
         # classifier
