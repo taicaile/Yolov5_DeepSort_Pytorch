@@ -41,6 +41,8 @@ def compute_color_for_labels(label):
     color = [int((p * (label ** 2 - label + 1)) % 255) for p in palette]
     return tuple(color)
 
+def get_optimal_font_scale(minwidth):
+    return max(minwidth/75, 0.5)
 
 def draw_boxes(img, bbox, identities=None, offset=(0, 0), classes_names=None):
     for i, box in enumerate(bbox):
@@ -52,14 +54,15 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), classes_names=None):
         # box text and bar
         id = int(identities[i]) if identities is not None else 0
         color = compute_color_for_labels(id)
-        cls_name = classes_names[i] if classes_names else ''
+        cls_name = classes_names[i][:3] if classes_names else ''
         label = '{}{:d}'.format(cls_name, id)
-        t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 2, 2)[0]
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
+        optimal_font_scale = get_optimal_font_scale(min(abs(x2-x1), abs(y2-y1)))
+        t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, 1)[0]
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 1)
         cv2.rectangle(
             img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
         cv2.putText(img, label, (x1, y1 +
-                                 t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, 2, [255, 255, 255], 2)
+                                 t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, [255, 255, 255], 1)
     return img
 
 
