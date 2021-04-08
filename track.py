@@ -65,6 +65,19 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), classes_names=None):
                                  t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, [255, 255, 255], 1)
     return img
 
+def draw_count(img, count:dict):
+    h,w,_= img.shape # h,w,c
+    x1,y1 = w//25, h//20
+
+    fontscale=min(3, h//160)
+    thickness=3
+
+    for name,num in count.items():
+        label = f"{name[:3]}:{num}"
+        label_width, label_height = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, fontscale, thickness)[0]
+        cv2.putText(img, label, (x1, y1+label_height//2), cv2.FONT_HERSHEY_PLAIN, fontscale, [0,0,255], thickness)
+        y1+=int(label_height*1.5)
+    return img
 
 def detect(opt, save_img=False):
     out, source, weights, view_img, save_txt, imgsz = \
@@ -118,6 +131,7 @@ def detect(opt, save_img=False):
     save_path = str(Path(out))
     txt_path = str(Path(out)) + '/results.txt'
 
+    seen = {}
     preframe = None
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         img = torch.from_numpy(img).to(device)
@@ -141,6 +155,7 @@ def detect(opt, save_img=False):
             if preframe and curframe<preframe:
                 print("new video detected, reset deepsort!!! ")
                 deepsort.reset()
+                seen = {}
             preframe = curframe
 
         # Process detections
@@ -187,9 +202,11 @@ def detect(opt, save_img=False):
                     # track id
                     identities = outputs[:, -2]
                     classes = outputs[:, -1]
-                    classes_names = [names[int(cls)] for cls in classes] if names else None
+                    classes_names = [names[cls] for cls in classes] if names else None
+                    for i,cls in enumerate(classes):
+                        seen[names[cls]] = max(identities[i], seen.get(names[cls],0))
                     draw_boxes(im0, bbox_xyxy, identities, classes_names=classes_names)
-
+                    draw_count(im0, seen)
                 # Write MOT compliant results to file
                 if save_txt and len(outputs) != 0:
                     for j, output in enumerate(outputs):
