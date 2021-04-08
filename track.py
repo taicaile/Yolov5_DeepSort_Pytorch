@@ -172,7 +172,7 @@ def detect(opt, save_img=False):
                     obj = [x_c, y_c, bbox_w, bbox_h]
                     bbox_xywh.append(obj)
                     confs.append([conf.item()])
-                    classes.append(cls.item())
+                    classes.append(int(cls.item()))
 
                 xywhs = torch.Tensor(bbox_xywh)
                 confss = torch.Tensor(confs)

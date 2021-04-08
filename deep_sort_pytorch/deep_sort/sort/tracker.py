@@ -46,11 +46,13 @@ class Tracker:
         self.kf = kalman_filter.KalmanFilter()
         self.tracks = []
         self._next_id = 1
+        self.seen = {}
 
     def reset(self):
         self.kf = kalman_filter.KalmanFilter()
         self.tracks = []
         self._next_id = 1
+        self.seen = {}
 
     def predict(self):
         """Propagate track state distributions one time step forward.
@@ -142,8 +144,12 @@ class Tracker:
         return matches, unmatched_tracks, unmatched_detections
 
     def _initiate_track(self, detection):
+        if detection.cls not in self.seen:
+            self.seen[detection.cls]=1
+        track_id_cls = self.seen[detection.cls]
         mean, covariance = self.kf.initiate(detection.to_xyah())
         self.tracks.append(Track(
-            mean, covariance, self._next_id, self.n_init, self.max_age,
+            mean, covariance, self._next_id, track_id_cls, self.n_init, self.max_age,
             detection.feature, detection.cls))
         self._next_id += 1
+        self.seen[detection.cls]+=1
