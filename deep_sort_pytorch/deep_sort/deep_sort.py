@@ -53,7 +53,7 @@ class DeepSort(object):
                 continue
             box = track.to_tlwh()
             x1, y1, x2, y2 = self._tlwh_to_xyxy(box)
-            track_id = track.track_id
+            track_id = track.track_id_cls
             cls = track.cls
             outputs.append(np.array([x1, y1, x2, y2, track_id, cls], dtype=np.int))
         if len(outputs) > 0:
