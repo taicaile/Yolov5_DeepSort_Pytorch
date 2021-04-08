@@ -118,6 +118,7 @@ def detect(opt, save_img=False):
     save_path = str(Path(out))
     txt_path = str(Path(out)) + '/results.txt'
 
+    preframe = None
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -133,6 +134,14 @@ def detect(opt, save_img=False):
         pred = non_max_suppression(
             pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
+
+        if vid_cap:
+            curframe = vid_cap.get(cv2.CAP_PROP_POS_FRAMES)
+            # detect new video, then reset deepsort trackers
+            if preframe and curframe<preframe:
+                print("new video detected, reset deepsort!!! ")
+                deepsort.reset()
+            preframe = curframe
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
@@ -201,7 +210,9 @@ def detect(opt, save_img=False):
 
             # Stream results
             if view_img:
-                cv2.imshow(p, im0)
+                # cv2.imshow(p, im0)
+                cv2.imshow('im0', im0)
+
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
 

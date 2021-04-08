@@ -47,6 +47,11 @@ class Tracker:
         self.tracks = []
         self._next_id = 1
 
+    def reset(self):
+        self.kf = kalman_filter.KalmanFilter()
+        self.tracks = []
+        self._next_id = 1
+
     def predict(self):
         """Propagate track state distributions one time step forward.
 
