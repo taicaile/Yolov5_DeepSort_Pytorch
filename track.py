@@ -1,3 +1,4 @@
+import collections
 import sys
 sys.path.insert(0, './yolov5')
 
@@ -79,6 +80,53 @@ def draw_count(img, count:dict):
         y1+=int(label_height*1.5)
     return img
 
+def draw_track_history(img, xys, color=[0,0,255]):
+    h,w,c = img.shape
+    p_size = min(h,w)//200
+    for x,y in xys:
+        img[y-p_size:y+p_size+1,x-p_size:x+p_size+1]=color
+
+class TrackHistory:
+    def __init__(self, max_size=20) -> None:
+        self.max_size = max_size
+        self.track_points = collections.defaultdict(list)
+        self.tracked_ids_frame = set()
+    def reset(self):
+        self.track_points.clear()
+        self.tracked_ids_frame.clear()
+
+    def _get_key(self, cls,track_id):
+        return f"{cls}:{track_id}"
+
+    def add_point(self, cls, track_id, xy):
+        key = self._get_key(cls, track_id)
+        self.track_points[key].append(xy)
+        if len(self.track_points[key])>self.max_size:
+            self.track_points[key].pop(0)
+        self.tracked_ids_frame.add(key)
+        
+    def pop(self,key):
+        if self.track_points[key].__len__()>0:
+            self.track_points[key].pop(0)
+        else:
+            self.track_points.pop(key)
+
+    def check_miss_track(self):
+        if self.tracked_ids_frame:
+            track_miss = set(self.track_points.keys())-self.tracked_ids_frame
+            for key in track_miss:
+                self.pop(key)
+        else:
+            for key in self.track_points.keys():
+                self.pop(key)
+
+    def draw_all_points(self, img):
+        # TODO plot history
+        for key,values in self.track_points.items():
+            id = int(key.split(':')[1])
+            color = compute_color_for_labels(id)
+            draw_track_history(img, values, color)
+
 def detect(opt, save_img=False):
     out, source, weights, view_img, save_txt, imgsz = \
         opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
@@ -131,7 +179,8 @@ def detect(opt, save_img=False):
     save_path = str(Path(out))
     txt_path = str(Path(out)) + '/results.txt'
 
-    seen = {}
+    seen_cls = {}
+    trackhis = TrackHistory()
     preframe = None
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         img = torch.from_numpy(img).to(device)
@@ -155,7 +204,8 @@ def detect(opt, save_img=False):
             if preframe and curframe<preframe:
                 print("new video detected, reset deepsort!!! ")
                 deepsort.reset()
-                seen = {}
+                trackhis.reset()
+                seen_cls = {}
             preframe = curframe
 
         # Process detections
@@ -195,7 +245,7 @@ def detect(opt, save_img=False):
                 # Pass detections to deepsort
                 # [x1, y1, x2, y2, track_id]
                 outputs = deepsort.update(xywhs, confss, classes, im0)
-
+                trackhis.tracked_ids_frame.clear()
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
@@ -204,9 +254,19 @@ def detect(opt, save_img=False):
                     classes = outputs[:, -1]
                     classes_names = [names[cls] for cls in classes] if names else None
                     for i,cls in enumerate(classes):
-                        seen[names[cls]] = max(identities[i], seen.get(names[cls],0))
+                        track_id = identities[i] # 这里的track_id不是针对所有类别的总id，而是每个类别的id
+                        seen_cls[names[cls]] = max(track_id, seen_cls.get(names[cls],0))
+                        # track history
+                        x1,y1,x2,y2 = bbox_xyxy[i]
+
+                        trackhis.add_point(cls,track_id,[(x1+x2)//2, (y1+y2)//2])
+
                     draw_boxes(im0, bbox_xyxy, identities, classes_names=classes_names)
-                    draw_count(im0, seen)
+                    draw_count(im0, seen_cls)
+            
+                trackhis.check_miss_track()
+                trackhis.draw_all_points(im0)
+
                 # Write MOT compliant results to file
                 if save_txt and len(outputs) != 0:
                     for j, output in enumerate(outputs):
