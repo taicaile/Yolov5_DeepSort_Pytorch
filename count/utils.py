@@ -50,5 +50,6 @@ def object_cross_line(a, b, xyxy):
     btw_dirs = [point_of_line(a,b,p) for p in [p1,p2,p3,p4]]
     is_betweens = [item[0] for item in btw_dirs]
     dirs = [item[1] for item in btw_dirs]
-
-    return all(is_betweens) and len(set(dirs))>1
+    # at least two points of an object is between line
+    # and in each side at least one point.
+    return sum(is_betweens)>1 and (dirs.count(1)>0 and dirs.count(-1)>0)
