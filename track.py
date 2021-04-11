@@ -1,5 +1,6 @@
 import collections
 import sys
+import json
 sys.path.insert(0, './yolov5')
 
 from yolov5.utils.datasets import LoadImages, LoadStreams
@@ -17,7 +18,7 @@ import cv2
 import torch
 import torch.backends.cudnn as cudnn
 
-
+from count import object_cross_line
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
 
@@ -82,9 +83,10 @@ def draw_count(img, count:dict):
 
 def draw_track_history(img, xys, color=[0,0,255]):
     h,w,c = img.shape
-    p_size = min(h,w)//200
+    radius = min(h,w)//100
     for x,y in xys:
-        img[y-p_size:y+p_size+1,x-p_size:x+p_size+1]=color
+        cv2.circle(img,(x,y),color=color, radius=radius, thickness=-1)
+        # img[y-p_size:y+p_size+1,x-p_size:x+p_size+1]=color
 
 class TrackHistory:
     def __init__(self, max_size=20) -> None:
@@ -121,11 +123,81 @@ class TrackHistory:
                 self.pop(key)
 
     def draw_all_points(self, img):
-        # TODO plot history
+
         for key,values in self.track_points.items():
             id = int(key.split(':')[1])
             color = compute_color_for_labels(id)
             draw_track_history(img, values, color)
+
+class Line:
+    def __init__(self,a,b,name='') -> None:
+        self.a = a
+        self.b = b
+        self.name = name
+
+class VehicleCrossLine:
+    def __init__(self) -> None:
+        self.tracks_cur = set()
+        self.lines = None
+        # missed over 5 time, delete track history
+        self.miss_thr = 5 
+    def load_json(self, file):
+        with open(file, 'r') as f:
+            j = json.load(f)
+            return j['lines']
+        
+    def init(self, cfg):
+        self.tracks = {}
+        self.count = {}
+        self.missed = {}
+        self.tracks_cur.clear()
+        self.lines = self.load_json(cfg)
+        for line in self.lines:
+            self.tracks[line['name']] = collections.defaultdict(list)
+            self.count[line['name']] = collections.defaultdict(int)
+            self.missed[line['name']] = collections.defaultdict(int)
+
+    def _get_key(self, cls, track_id):
+        return f"{cls}:{track_id}"
+
+    def add_track(self, cls, track_id, xyxy):
+        key = self._get_key(cls, track_id)
+        self.tracks_cur.add(key)
+        for line in self.lines:
+            is_cross = object_cross_line(line['a'],line['b'],xyxy)
+            cur_track = self.tracks[line['name']][key]
+            cur_track.append(is_cross)
+            if len(cur_track)>=2 and cur_track[-1]==True and not any(cur_track[:-1]):
+                self.count[line['name']][cls]+=1
+
+    def check_miss_tracks(self):
+        for line in self.lines:
+            tracks = self.tracks[line['name']]
+            missed_tracks = set(tracks.keys()) - self.tracks_cur
+            for key in missed_tracks:
+                self.missed[line['name']][key]+=1
+                if self.missed[line['name']][key]>self.miss_thr:
+                    self.missed[line['name']].pop(key)
+
+
+    def plot(self, img):
+        h,w,_= img.shape # h,w,c
+        for line in self.lines:
+            # plot line
+            cv2.circle(img, tuple(line['a']), 5, (0, 0, 255), -1) 
+            cv2.circle(img, tuple(line['b']), 5, (0, 0, 255), -1) 
+            cv2.line(img=img, pt1=tuple(line['a']), pt2=tuple(line['b']),
+                     color=(255, 0, 0), thickness=2)
+            # plot count total near point a
+            fontscale=min(3, h//160)
+            thickness=3
+            label = str(sum(self.count[line['name']].values()))
+            label_width, label_height = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 
+                                                        fontscale, thickness)[0]
+            x,y = line['a']
+            x = max(label_width//2, x)
+            x = min(w-label_width, x)
+            cv2.putText(img, label, (x,y-label_height//2), cv2.FONT_HERSHEY_PLAIN, fontscale, [0,0,255], thickness)
 
 def detect(opt, save_img=False):
     out, source, weights, view_img, save_txt, imgsz = \
@@ -181,6 +253,7 @@ def detect(opt, save_img=False):
 
     seen_cls = {}
     trackhis = TrackHistory()
+    crossline = VehicleCrossLine()
     preframe = None
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         img = torch.from_numpy(img).to(device)
@@ -201,10 +274,14 @@ def detect(opt, save_img=False):
         if vid_cap:
             curframe = vid_cap.get(cv2.CAP_PROP_POS_FRAMES)
             # detect new video, then reset deepsort trackers
+            if not preframe:
+                # first video
+                crossline.init(Path(path).with_suffix(".json"))
             if preframe and curframe<preframe:
                 print("new video detected, reset deepsort!!! ")
                 deepsort.reset()
                 trackhis.reset()
+                crossline.init(Path(path).with_suffix(".json"))
                 seen_cls = {}
             preframe = curframe
 
@@ -246,6 +323,8 @@ def detect(opt, save_img=False):
                 # [x1, y1, x2, y2, track_id]
                 outputs = deepsort.update(xywhs, confss, classes, im0)
                 trackhis.tracked_ids_frame.clear()
+                crossline.tracks_cur.clear()
+                
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
@@ -256,17 +335,22 @@ def detect(opt, save_img=False):
                     for i,cls in enumerate(classes):
                         track_id = identities[i] # 这里的track_id不是针对所有类别的总id，而是每个类别的id
                         seen_cls[names[cls]] = max(track_id, seen_cls.get(names[cls],0))
+                        
                         # track history
                         x1,y1,x2,y2 = bbox_xyxy[i]
-
                         trackhis.add_point(cls,track_id,[(x1+x2)//2, (y1+y2)//2])
+
+                        # cross detection line
+                        crossline.add_track(cls,track_id,bbox_xyxy[i])
+                        
 
                     draw_boxes(im0, bbox_xyxy, identities, classes_names=classes_names)
                     draw_count(im0, seen_cls)
             
                 trackhis.check_miss_track()
                 trackhis.draw_all_points(im0)
-
+                crossline.check_miss_tracks()
+                crossline.plot(im0)
                 # Write MOT compliant results to file
                 if save_txt and len(outputs) != 0:
                     for j, output in enumerate(outputs):
