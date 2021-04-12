@@ -145,8 +145,11 @@ class VehicleCrossLine:
         with open(file, 'r') as f:
             j = json.load(f)
             return j['lines']
-        
     def init(self, cfg):
+        if not os.path.exists(cfg):
+            self.mode = False
+            return
+        self.mode = True
         self.tracks = {}
         self.count = {}
         self.missed = {}
@@ -161,6 +164,8 @@ class VehicleCrossLine:
         return f"{cls}:{track_id}"
 
     def add_track(self, cls, track_id, xyxy):
+        if not self.mode:
+            return
         key = self._get_key(cls, track_id)
         self.tracks_cur.add(key)
         for line in self.lines:
@@ -171,6 +176,8 @@ class VehicleCrossLine:
                 self.count[line['name']][cls]+=1
 
     def check_miss_tracks(self):
+        if not self.mode:
+            return
         for line in self.lines:
             tracks = self.tracks[line['name']]
             missed_tracks = set(tracks.keys()) - self.tracks_cur
@@ -181,6 +188,8 @@ class VehicleCrossLine:
 
 
     def plot(self, img):
+        if not self.mode:
+            return
         h,w,_= img.shape # h,w,c
         for line in self.lines:
             # plot line
