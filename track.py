@@ -71,8 +71,8 @@ def draw_count(img, count:dict):
     h,w,_= img.shape # h,w,c
     x1,y1 = w//25, h//20
 
-    fontscale=min(3, h//160)
-    thickness=3
+    fontscale=min(3, h//300)
+    thickness=2
 
     for name,num in count.items():
         label = f"{name[:3]}:{num}"
@@ -83,7 +83,7 @@ def draw_count(img, count:dict):
 
 def draw_track_history(img, xys, color=[0,0,255]):
     h,w,c = img.shape
-    radius = min(h,w)//100
+    radius = min(h,w)//200
     for x,y in xys:
         cv2.circle(img,(x,y),color=color, radius=radius, thickness=-1)
         # img[y-p_size:y+p_size+1,x-p_size:x+p_size+1]=color
@@ -144,7 +144,15 @@ class VehicleCrossLine:
     def load_json(self, file):
         with open(file, 'r') as f:
             j = json.load(f)
-            return j['lines']
+            lines = j['lines']
+            names = set([line['name'] for line in lines])
+            if len(names)!=len(lines):
+                print("names are not set for all line, reset names...")
+                name = 'A'
+                for line in lines:
+                    line['name']=name
+                    name = chr(ord(name)+1)
+            return lines
     def init(self, cfg):
         if not os.path.exists(cfg):
             self.mode = False
@@ -199,7 +207,7 @@ class VehicleCrossLine:
                      color=(255, 0, 0), thickness=2)
             # plot count total near point a
             fontscale=min(3, h//160)
-            thickness=3
+            thickness=2
             label = str(sum(self.count[line['name']].values()))
             label_width, label_height = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 
                                                         fontscale, thickness)[0]
