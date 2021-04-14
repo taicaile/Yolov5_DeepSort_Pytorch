@@ -67,15 +67,14 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), classes_names=None):
                                  t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, [255, 255, 255], 1)
     return img
 
-def draw_count(img, count:dict):
+def draw_count(img, count:dict, x1,y1):
     h,w,_= img.shape # h,w,c
-    x1,y1 = w//25, h//20
 
     fontscale=min(3, h//300)
     thickness=2
 
     for name,num in count.items():
-        label = f"{name[:3]}:{num}"
+        label = f"{str(name):>10s}:{num}"
         label_width, label_height = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, fontscale, thickness)[0]
         cv2.putText(img, label, (x1, y1+label_height//2), cv2.FONT_HERSHEY_PLAIN, fontscale, [0,0,255], thickness)
         y1+=int(label_height*1.5)
@@ -135,9 +134,13 @@ class Line:
         self.b = b
         self.name = name
 
-class VehicleCrossLine:
-    def __init__(self) -> None:
+class CrossLine:
+    def __init__(self, names) -> None:
+        self.names = names
         self.tracks_cur = set()
+        self.tracks = {}
+        self.count = {}
+        self.missed = {}
         self.lines = None
         # missed over 5 time, delete track history
         self.miss_thr = 5 
@@ -155,12 +158,12 @@ class VehicleCrossLine:
             return lines
     def init(self, cfg):
         if not os.path.exists(cfg):
-            self.mode = False
+            self.running = False
             return
-        self.mode = True
-        self.tracks = {}
-        self.count = {}
-        self.missed = {}
+        self.running = True
+        self.tracks.clear()
+        self.count.clear()
+        self.missed.clear()
         self.tracks_cur.clear()
         self.lines = self.load_json(cfg)
         for line in self.lines:
@@ -172,7 +175,7 @@ class VehicleCrossLine:
         return f"{cls}:{track_id}"
 
     def add_track(self, cls, track_id, xyxy):
-        if not self.mode:
+        if not self.running:
             return
         key = self._get_key(cls, track_id)
         self.tracks_cur.add(key)
@@ -181,10 +184,10 @@ class VehicleCrossLine:
             cur_track = self.tracks[line['name']][key]
             cur_track.append(is_cross)
             if len(cur_track)>=2 and cur_track[-1]==True and not any(cur_track[:-1]):
-                self.count[line['name']][cls]+=1
+                self.count[line['name']][self.names[cls]]+=1
 
     def check_miss_tracks(self):
-        if not self.mode:
+        if not self.running:
             return
         for line in self.lines:
             tracks = self.tracks[line['name']]
@@ -196,7 +199,7 @@ class VehicleCrossLine:
 
 
     def plot(self, img):
-        if not self.mode:
+        if not self.running:
             return
         h,w,_= img.shape # h,w,c
         for line in self.lines:
@@ -215,6 +218,8 @@ class VehicleCrossLine:
             x = max(label_width//2, x)
             x = min(w-label_width, x)
             cv2.putText(img, label, (x,y-label_height//2), cv2.FONT_HERSHEY_PLAIN, fontscale, [0,0,255], thickness)
+            x1,y1 = min(line['a'][0], line['b'][0]), h//20
+            draw_count(img, self.count[line['name']],x1,y1)
 
 def detect(opt, save_img=False):
     out, source, weights, view_img, save_txt, imgsz = \
@@ -270,7 +275,7 @@ def detect(opt, save_img=False):
 
     seen_cls = {}
     trackhis = TrackHistory()
-    crossline = VehicleCrossLine()
+    crossline = CrossLine(names)
     preframe = None
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         img = torch.from_numpy(img).to(device)
@@ -362,7 +367,7 @@ def detect(opt, save_img=False):
                         
 
                     draw_boxes(im0, bbox_xyxy, identities, classes_names=classes_names)
-                    draw_count(im0, seen_cls)
+                    # draw_count(im0, seen_cls)
             
                 trackhis.check_miss_track()
                 trackhis.draw_all_points(im0)
