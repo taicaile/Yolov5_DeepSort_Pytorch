@@ -118,7 +118,7 @@ class TrackHistory:
             for key in track_miss:
                 self.pop(key)
         else:
-            for key in self.track_points.keys():
+            for key in list(self.track_points.keys()):
                 self.pop(key)
 
     def draw_all_points(self, img):
