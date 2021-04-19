@@ -17,11 +17,16 @@ from pathlib import Path
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
-
+import random
 from count import object_cross_line
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
-
+BGR_COLORS =[
+            (0, 0, 255), (255, 0, 0), (0, 255, 0), (255, 255, 0), (0, 255, 255),
+            (255, 0, 255), (192, 192, 192), (128, 128, 128), (128, 0, 0),
+            (128, 128, 0), (0, 128, 0), (128, 0, 128), (0, 128, 128), (0, 0, 128)
+            ]
+names = []
 
 def bbox_rel(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -35,6 +40,13 @@ def bbox_rel(*xyxy):
     h = bbox_h
     return x_c, y_c, w, h
 
+def get_color_by_label(label):
+    # Make the class colors the same each session
+    # The colors are in BGR order because we're using OpenCV
+    id = names.index(label)
+    while id>=len(BGR_COLORS):
+        BGR_COLORS.append((random.randint(0,255) for _ in range(3)))
+    return BGR_COLORS[id]
 
 def compute_color_for_labels(label):
     """
@@ -44,9 +56,10 @@ def compute_color_for_labels(label):
     return tuple(color)
 
 def get_optimal_font_scale(minwidth):
-    return max(minwidth/75, 0.75)
+    return max(minwidth/50, 0.5)
 
-def draw_boxes(img, bbox, identities=None, offset=(0, 0), classes_names=None):
+def draw_boxes(img, bbox, identities=None, offset=(0, 0), box_names=''):
+    alpha=0.1
     for i, box in enumerate(bbox):
         x1, y1, x2, y2 = [int(i) for i in box]
         x1 += offset[0]
@@ -55,19 +68,24 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), classes_names=None):
         y2 += offset[1]
         # box text and bar
         id = int(identities[i]) if identities is not None else 0
-        color = compute_color_for_labels(id)
-        cls_name = classes_names[i][:3] if classes_names else ''
-        label = '{}{:d}'.format(cls_name, id)
+        color = get_color_by_label(box_names[i])
+        cls_name = box_names[i]
+        # label = '{}:{}'.format(cls_name, id)
+        label = cls_name
         optimal_font_scale = get_optimal_font_scale(min(abs(x2-x1), abs(y2-y1)))
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, 1)[0]
+        center = ((x1+x2)//2-t_size[0]//2, (y1+y2)//2+t_size[1]//2)
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 1)
+        # TODO add transparent
+        overlay = img.copy()
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+        cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
         cv2.rectangle(
-            img, (x1, y1), (x1 + t_size[0] + 3, y1 + t_size[1] + 4), color, -1)
-        cv2.putText(img, label, (x1, y1 +
-                                 t_size[1] + 4), cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, [255, 255, 255], 1)
+            img, (center[0],center[1]-t_size[1]), (center[0]+t_size[0], center[1]), color, -1)
+        cv2.putText(img, label, center, cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, [255, 255, 255], 1)
     return img
 
-def draw_count(img, count:dict, x1,y1):
+def draw_count(img, count, x1, y1):
     h,w,_= img.shape # h,w,c
 
     fontscale=min(3, h//300)
@@ -82,9 +100,14 @@ def draw_count(img, count:dict, x1,y1):
 
 def draw_track_history(img, xys, color=[0,0,255]):
     h,w,c = img.shape
-    radius = min(h,w)//200
+    # radius = min(h,w)//200
+    radius = 2
+    pre = None
     for x,y in xys:
         cv2.circle(img,(x,y),color=color, radius=radius, thickness=-1)
+        if pre is not None:
+            cv2.line(img, pre, (x,y), color, thickness=radius)
+        pre = (x,y)
         # img[y-p_size:y+p_size+1,x-p_size:x+p_size+1]=color
 
 class TrackHistory:
@@ -121,11 +144,10 @@ class TrackHistory:
             for key in list(self.track_points.keys()):
                 self.pop(key)
 
-    def draw_all_points(self, img):
-
+    def plot(self, img):
         for key,values in self.track_points.items():
-            id = int(key.split(':')[1])
-            color = compute_color_for_labels(id)
+            label = key.split(':')[0]
+            color = get_color_by_label(label)
             draw_track_history(img, values, color)
 
 class Line:
@@ -262,6 +284,7 @@ def detect(opt, save_img=False):
         dataset = LoadImages(source, img_size=imgsz)
 
     # Get names and colors
+    global names
     names = model.module.names if hasattr(model, 'module') else model.names
 
     # Run inference
@@ -360,17 +383,16 @@ def detect(opt, save_img=False):
                         
                         # track history
                         x1,y1,x2,y2 = bbox_xyxy[i]
-                        trackhis.add_point(cls,track_id,[(x1+x2)//2, (y1+y2)//2])
+                        trackhis.add_point(names[cls],track_id,[(x1+x2)//2, (y1+y2)//2])
 
                         # cross detection line
                         crossline.add_track(cls,track_id,bbox_xyxy[i])
-                        
 
-                    draw_boxes(im0, bbox_xyxy, identities, classes_names=classes_names)
+                    draw_boxes(im0, bbox_xyxy, identities, box_names=classes_names)
                     # draw_count(im0, seen_cls)
             
                 trackhis.check_miss_track()
-                trackhis.draw_all_points(im0)
+                trackhis.plot(im0)
                 crossline.check_miss_tracks()
                 crossline.plot(im0)
                 # Write MOT compliant results to file
