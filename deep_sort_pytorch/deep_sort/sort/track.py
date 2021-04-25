@@ -63,16 +63,15 @@ class Track:
 
     """
 
-    def __init__(self, mean, covariance, track_id, track_id_cls, n_init, max_age,
+    def __init__(self, mean, covariance, track_id, n_init, max_age,
                  feature=None, cls=None):
         self.mean = mean
         self.covariance = covariance
         self.track_id = track_id
-        self.track_id_cls = track_id_cls
         self.hits = 1
         self.age = 1
         self.time_since_update = 0
-
+        self.xyes = [mean[:2].tolist()]
         self.state = TrackState.Tentative
         self.features = []
         if feature is not None:
@@ -95,20 +94,6 @@ class Track:
         ret = self.mean[:4].copy()
         ret[2] *= ret[3]
         ret[:2] -= ret[2:] / 2
-        return ret
-
-    def to_tlbr(self):
-        """Get current position in bounding box format `(min x, miny, max x,
-        max y)`.
-
-        Returns
-        -------
-        ndarray
-            The bounding box.
-
-        """
-        ret = self.to_tlwh()
-        ret[2:] = ret[:2] + ret[2:]
         return ret
 
     def increment_age(self):
@@ -140,10 +125,10 @@ class Track:
             The associated detection.
 
         """
-        self.mean, self.covariance = kf.update(
-            self.mean, self.covariance, detection.to_xyah())
+        self.mean, self.covariance = kf.update(self.mean, self.covariance, detection.to_xyah())
+        self.xyes.append(self.mean[:2].tolist())
         self.features.append(detection.feature)
-
+        self.cls = detection.cls
         self.hits += 1
         self.time_since_update = 0
         if self.state == TrackState.Tentative and self.hits >= self._n_init:
@@ -152,6 +137,8 @@ class Track:
     def mark_missed(self):
         """Mark this track as missed (no association at the current time step).
         """
+        self.xyes.append(self.mean[:2].tolist())
+
         if self.state == TrackState.Tentative:
             self.state = TrackState.Deleted
         elif self.time_since_update > self._max_age:

@@ -12,17 +12,18 @@ __all__ = ['DeepSort']
 
 
 class DeepSort(object):
-    def __init__(self, model_path, max_dist=0.2, min_confidence=0.3, nms_max_overlap=1.0, max_iou_distance=0.7, max_age=70, n_init=3, nn_budget=100, use_cuda=True):
+    def __init__(self, model_path, max_dist=0.2, min_confidence=0.3, nms_max_overlap=1.0, 
+                 max_iou_distance=0.7, max_age=70, n_init=3, nn_budget=100, use_cuda=True):
+        
         self.min_confidence = min_confidence
         self.nms_max_overlap = nms_max_overlap
 
         self.extractor = Extractor(model_path, use_cuda=use_cuda)
 
         max_cosine_distance = max_dist
-        metric = NearestNeighborDistanceMetric(
-            "cosine", max_cosine_distance, nn_budget)
-        self.tracker = Tracker(
-            metric, max_iou_distance=max_iou_distance, max_age=max_age, n_init=n_init)
+        metric = NearestNeighborDistanceMetric("cosine", max_cosine_distance, nn_budget)
+        self.tracker = Tracker(metric, max_iou_distance=max_iou_distance, 
+                               max_age=max_age, n_init=n_init)
 
     def reset(self):
         self.tracker.reset()
@@ -32,15 +33,17 @@ class DeepSort(object):
         # generate detections
         features = self._get_features(bbox_xywh, ori_img)
         bbox_tlwh = self._xywh_to_tlwh(bbox_xywh)
-        detections = [Detection(bbox_tlwh[i], conf, features[i], classes[i]) for i, conf in enumerate(
-            confidences) if conf > self.min_confidence]
+        detections = [Detection(bbox_tlwh[i], 
+                                conf, 
+                                features[i], 
+                                classes[i]) for i, conf in enumerate(confidences) if conf > self.min_confidence]
 
         # run on non-maximum supression
-        boxes = np.array([d.tlwh for d in detections])
-        scores = np.array([d.confidence for d in detections])
-        # 这里为什么要再次运行 non-max suppression, 可能是自己的参数？
-        indices = non_max_suppression(boxes, self.nms_max_overlap, scores)
-        detections = [detections[i] for i in indices]
+        # boxes = np.array([d.tlwh for d in detections])
+        # scores = np.array([d.confidence for d in detections])
+        # # 这里为什么要再次运行 non-max suppression, 可能是自己的参数？
+        # indices = non_max_suppression(boxes, self.nms_max_overlap, scores)
+        # detections = [detections[i] for i in indices]
 
         # update tracker
         self.tracker.predict()
@@ -53,7 +56,7 @@ class DeepSort(object):
                 continue
             box = track.to_tlwh()
             x1, y1, x2, y2 = self._tlwh_to_xyxy(box)
-            track_id = track.track_id_cls
+            track_id = track.track_id
             cls = track.cls
             outputs.append(np.array([x1, y1, x2, y2, track_id, cls], dtype=np.int))
         if len(outputs) > 0:
