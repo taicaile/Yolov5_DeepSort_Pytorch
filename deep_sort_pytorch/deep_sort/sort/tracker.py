@@ -123,15 +123,21 @@ class Tracker:
             else:
                 unconfirmed_tracks.append(i)
 
+        # Disable appearance features matching
         # Associate confirmed tracks using appearance features.
-        matches_a, unmatched_tracks_a, unmatched_detections = \
-            linear_assignment.matching_cascade(gated_metric, 
-                                              self.metric.matching_threshold, 
-                                              self.max_age,
-                                              self.tracks, 
-                                              detections, 
-                                              confirmed_tracks)
-
+        enable_appearance_matching = False
+        if enable_appearance_matching:
+            matches_a, unmatched_tracks_a, unmatched_detections = \
+                linear_assignment.matching_cascade(gated_metric, 
+                                                self.metric.matching_threshold, 
+                                                self.max_age,
+                                                self.tracks, 
+                                                detections, 
+                                                confirmed_tracks)
+        else:
+            matches_a = []
+            unmatched_tracks_a = confirmed_tracks.copy()
+            unmatched_detections = list(range(len(detections)))
         # Associate remaining tracks together with unconfirmed tracks using IOU.
         
         iou_track_candidates = unconfirmed_tracks + [k for k in unmatched_tracks_a if self.tracks[k].time_since_update == 1]

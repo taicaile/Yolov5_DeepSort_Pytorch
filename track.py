@@ -58,7 +58,7 @@ def compute_color_for_labels(label):
     return tuple(color)
 
 def get_optimal_font_scale(minwidth):
-    return max(minwidth/50, 0.75)
+    return max(minwidth/50, 0.5)
 
 def draw_boxes(img, bbox, identities=None, offset=(0, 0), box_names=''):
     alpha=0.1
@@ -72,8 +72,7 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), box_names=''):
         id = int(identities[i]) if identities is not None else 0
         color = get_color_by_label(box_names[i])
         cls_name = box_names[i]
-        label = '{}:{}'.format(cls_name, id)
-        # label = cls_name
+        label = '{}{}'.format(cls_name, id)
         optimal_font_scale = get_optimal_font_scale(min(abs(x2-x1), abs(y2-y1)))
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, 1)[0]
         center = ((x1+x2)//2-t_size[0]//2, (y1+y2)//2+t_size[1]//2)
@@ -94,7 +93,7 @@ def draw_count(img, count, x1, y1):
     thickness=2
 
     for name,num in count.items():
-        label = f"{str(name):>10s}:{num}"
+        label = f"{str(name):>12s}:{num}"
         label_width, label_height = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, fontscale, thickness)[0]
         cv2.putText(img, label, (x1, y1+label_height//2), cv2.FONT_HERSHEY_PLAIN, fontscale, [0,0,255], thickness)
         y1+=int(label_height*1.5)
@@ -304,8 +303,7 @@ def detect(opt, save_img=False):
     trackhis = TrackHistory()
     crossline = CrossLine(names)
     preframe = None
-    pbar = tqdm(dataset, total=dataset.nf)
-    for frame_idx, (path, img, im0s, vid_cap) in enumerate(pbar):
+    for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
         des = ""
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -330,10 +328,8 @@ def detect(opt, save_img=False):
             # detect new video, then reset deepsort trackers
             if not preframe:
                 # first video
-                pbar.total = dataset.nf
                 crossline.init(Path(path).with_suffix(".json"))
             if preframe and curframe<preframe:
-                pbar.total = dataset.nf
                 print("new video detected, reset deepsort!!! ")
                 deepsort.reset()
                 trackhis.reset()
@@ -398,11 +394,12 @@ def detect(opt, save_img=False):
                         # cross detection line
                         crossline.add_track(cls,track_id,bbox_xyxy[i])
 
+                trackhis.check_miss_track()
+                trackhis.plot(im0)
+                if len(outputs) > 0:
                     draw_boxes(im0, bbox_xyxy, identities, box_names=classes_names)
                     # draw_count(im0, seen_cls)
             
-                trackhis.check_miss_track()
-                trackhis.plot(im0)
                 crossline.check_miss_tracks()
                 crossline.plot(im0)
                 # Write MOT compliant results to file
@@ -449,8 +446,7 @@ def detect(opt, save_img=False):
                         vid_writer = cv2.VideoWriter(
                             save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
                     vid_writer.write(im0)
-            pbar.update(1)
-            pbar.set_description(des)
+            print(des)
 
     if save_txt or save_img:
         print('Results saved to %s' % os.getcwd() + os.sep + out)
