@@ -127,8 +127,7 @@ class NearestNeighborDistanceMetric(object):
         elif metric == "cosine":
             self._metric = _nn_cosine_distance
         else:
-            raise ValueError(
-                "Invalid metric; must be either 'euclidean' or 'cosine'")
+            raise ValueError("Invalid metric; must be either 'euclidean' or 'cosine'")
         self.matching_threshold = matching_threshold
         self.budget = budget
         self.samples = {}

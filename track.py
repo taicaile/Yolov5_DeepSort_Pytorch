@@ -18,6 +18,7 @@ import cv2
 import torch
 import torch.backends.cudnn as cudnn
 import random
+from tqdm import tqdm
 from count import object_cross_line
 
 palette = (2 ** 11 - 1, 2 ** 15 - 1, 2 ** 20 - 1)
@@ -27,6 +28,7 @@ BGR_COLORS =[
             (128, 128, 0), (0, 128, 0), (128, 0, 128), (0, 128, 128), (0, 0, 128)
             ]
 names = []
+VIEW_IMG_WIN_NAME = "view-image"
 
 def bbox_rel(*xyxy):
     """" Calculates the relative bounding box from absolute pixel values. """
@@ -70,8 +72,7 @@ def draw_boxes(img, bbox, identities=None, offset=(0, 0), box_names=''):
         id = int(identities[i]) if identities is not None else 0
         color = get_color_by_label(box_names[i])
         cls_name = box_names[i]
-        # label = '{}:{}'.format(cls_name, id)
-        label = cls_name
+        label = '{}{}'.format(cls_name, id)
         optimal_font_scale = get_optimal_font_scale(min(abs(x2-x1), abs(y2-y1)))
         t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, optimal_font_scale, 1)[0]
         center = ((x1+x2)//2-t_size[0]//2, (y1+y2)//2+t_size[1]//2)
@@ -92,7 +93,7 @@ def draw_count(img, count, x1, y1):
     thickness=2
 
     for name,num in count.items():
-        label = f"{str(name):>10s}:{num}"
+        label = f"{str(name):>12s}:{num}"
         label_width, label_height = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, fontscale, thickness)[0]
         cv2.putText(img, label, (x1, y1+label_height//2), cv2.FONT_HERSHEY_PLAIN, fontscale, [0,0,255], thickness)
         y1+=int(label_height*1.5)
@@ -101,7 +102,7 @@ def draw_count(img, count, x1, y1):
 def draw_track_history(img, xys, color=[0,0,255]):
     h,w,c = img.shape
     # radius = min(h,w)//200
-    radius = 2
+    radius = 1
     pre = None
     for x,y in xys:
         cv2.circle(img,(x,y),color=color, radius=radius, thickness=-1)
@@ -275,13 +276,15 @@ def detect(opt, save_img=False):
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
-        view_img = True
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz)
     else:
         # view_img = True
         save_img = True
         dataset = LoadImages(source, img_size=imgsz)
+
+    if view_img:
+        cv2.namedWindow(VIEW_IMG_WIN_NAME, cv2.WINDOW_KEEPRATIO)
 
     # Get names and colors
     global names
@@ -301,6 +304,7 @@ def detect(opt, save_img=False):
     crossline = CrossLine(names)
     preframe = None
     for frame_idx, (path, img, im0s, vid_cap) in enumerate(dataset):
+        des = ""
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -312,8 +316,11 @@ def detect(opt, save_img=False):
         pred = model(img, augment=opt.augment)[0]
 
         # Apply NMS
-        pred = non_max_suppression(
-            pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
+        pred = non_max_suppression(pred, 
+                                   opt.conf_thres, 
+                                   opt.iou_thres, 
+                                   classes=opt.classes, 
+                                   agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
 
         if vid_cap:
@@ -342,8 +349,7 @@ def detect(opt, save_img=False):
 
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(
-                    img.shape[2:], det[:, :4], im0.shape).round()
+                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
                 # Print results
                 for c in det[:, -1].unique():
@@ -369,7 +375,7 @@ def detect(opt, save_img=False):
                 outputs = deepsort.update(xywhs, confss, classes, im0)
                 trackhis.tracked_ids_frame.clear()
                 crossline.tracks_cur.clear()
-                
+
                 # draw boxes for visualization
                 if len(outputs) > 0:
                     bbox_xyxy = outputs[:, :4]
@@ -378,7 +384,7 @@ def detect(opt, save_img=False):
                     classes = outputs[:, -1]
                     classes_names = [names[cls] for cls in classes] if names else None
                     for i,cls in enumerate(classes):
-                        track_id = identities[i] # 这里的track_id不是针对所有类别的总id，而是每个类别的id
+                        track_id = identities[i]
                         seen_cls[names[cls]] = max(track_id, seen_cls.get(names[cls],0))
                         
                         # track history
@@ -388,11 +394,12 @@ def detect(opt, save_img=False):
                         # cross detection line
                         crossline.add_track(cls,track_id,bbox_xyxy[i])
 
+                trackhis.check_miss_track()
+                trackhis.plot(im0)
+                if len(outputs) > 0:
                     draw_boxes(im0, bbox_xyxy, identities, box_names=classes_names)
                     # draw_count(im0, seen_cls)
             
-                trackhis.check_miss_track()
-                trackhis.plot(im0)
                 crossline.check_miss_tracks()
                 crossline.plot(im0)
                 # Write MOT compliant results to file
@@ -411,23 +418,23 @@ def detect(opt, save_img=False):
                 deepsort.increment_ages()
 
             # Print time (inference + NMS)
-            print('%sDone. (%.3fs)' % (s, t2 - t1))
+            des+='%sDone. (%.3fs) ' % (s, t2 - t1)
 
             # Stream results
             if view_img:
                 # cv2.imshow(p, im0)
-                cv2.imshow('im0', im0)
+                cv2.imshow(VIEW_IMG_WIN_NAME, im0)
 
                 if cv2.waitKey(1) == ord('q'):  # q to quit
                     raise StopIteration
 
             # Save results (image with detections)
             if save_img:
-                print('saving img!')
+                des+='saving img! '
                 if dataset.mode == 'images':
                     cv2.imwrite(save_path, im0)
                 else:
-                    print('saving video!')
+                    des+='saving video! '
                     if vid_path != save_path:  # new video
                         vid_path = save_path
                         if isinstance(vid_writer, cv2.VideoWriter):
@@ -439,6 +446,7 @@ def detect(opt, save_img=False):
                         vid_writer = cv2.VideoWriter(
                             save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
                     vid_writer.write(im0)
+            print(des)
 
     if save_txt or save_img:
         print('Results saved to %s' % os.getcwd() + os.sep + out)

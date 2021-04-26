@@ -46,13 +46,11 @@ class Tracker:
         self.kf = kalman_filter.KalmanFilter()
         self.tracks = []
         self._next_id = 1
-        self.seen = {}
 
     def reset(self):
         self.kf = kalman_filter.KalmanFilter()
         self.tracks = []
         self._next_id = 1
-        self.seen = {}
 
     def predict(self):
         """Propagate track state distributions one time step forward.
@@ -77,13 +75,11 @@ class Tracker:
 
         """
         # Run matching cascade.
-        matches, unmatched_tracks, unmatched_detections = \
-            self._match(detections)
+        matches, unmatched_tracks, unmatched_detections = self._match(detections)
 
         # Update track set.
         for track_idx, detection_idx in matches:
-            self.tracks[track_idx].update(
-                self.kf, detections[detection_idx])
+            self.tracks[track_idx].update(self.kf, detections[detection_idx])
         for track_idx in unmatched_tracks:
             self.tracks[track_idx].mark_missed()
         for detection_idx in unmatched_detections:
@@ -99,57 +95,74 @@ class Tracker:
             features += track.features
             targets += [track.track_id for _ in track.features]
             track.features = []
-        self.metric.partial_fit(
-            np.asarray(features), np.asarray(targets), active_targets)
+        self.metric.partial_fit(np.asarray(features), np.asarray(targets), active_targets)
 
     def _match(self, detections):
 
         def gated_metric(tracks, dets, track_indices, detection_indices):
             features = np.array([dets[i].feature for i in detection_indices])
             targets = np.array([tracks[i].track_id for i in track_indices])
-
+            # features.shape : (10,512)
+            # targets.shape : (9,)
             cost_matrix = self.metric.distance(features, targets)
-            cost_matrix = linear_assignment.gate_cost_matrix(
-                self.kf, cost_matrix, tracks, dets, track_indices,
-                detection_indices)
-
+            # cost_matrix.shape : (9,10), 9 is track indices, 10 is detection indices
+            cost_matrix = linear_assignment.gate_cost_matrix(self.kf, 
+                                                             cost_matrix, 
+                                                             tracks, 
+                                                             dets, 
+                                                             track_indices,
+                                                             detection_indices)
             return cost_matrix
 
         # Split track set into confirmed and unconfirmed tracks.
-        confirmed_tracks = [
-            i for i, t in enumerate(self.tracks) if t.is_confirmed()]
-        unconfirmed_tracks = [
-            i for i, t in enumerate(self.tracks) if not t.is_confirmed()]
+        confirmed_tracks = []
+        unconfirmed_tracks = []
+        for i,t in enumerate(self.tracks):
+            if t.is_confirmed():
+                confirmed_tracks.append(i)
+            else:
+                unconfirmed_tracks.append(i)
 
+        # Disable appearance features matching
         # Associate confirmed tracks using appearance features.
-        matches_a, unmatched_tracks_a, unmatched_detections = \
-            linear_assignment.matching_cascade(
-                gated_metric, self.metric.matching_threshold, self.max_age,
-                self.tracks, detections, confirmed_tracks)
-
+        enable_appearance_matching = False
+        if enable_appearance_matching:
+            matches_a, unmatched_tracks_a, unmatched_detections = \
+                linear_assignment.matching_cascade(gated_metric, 
+                                                self.metric.matching_threshold, 
+                                                self.max_age,
+                                                self.tracks, 
+                                                detections, 
+                                                confirmed_tracks)
+        else:
+            matches_a = []
+            unmatched_tracks_a = confirmed_tracks.copy()
+            unmatched_detections = list(range(len(detections)))
         # Associate remaining tracks together with unconfirmed tracks using IOU.
-        iou_track_candidates = unconfirmed_tracks + [
-            k for k in unmatched_tracks_a if
-            self.tracks[k].time_since_update == 1]
-        unmatched_tracks_a = [
-            k for k in unmatched_tracks_a if
-            self.tracks[k].time_since_update != 1]
+        
+        iou_track_candidates = unconfirmed_tracks + [k for k in unmatched_tracks_a if self.tracks[k].time_since_update == 1]
+        
+        unmatched_tracks_a = [k for k in unmatched_tracks_a if self.tracks[k].time_since_update != 1]
+        
         matches_b, unmatched_tracks_b, unmatched_detections = \
-            linear_assignment.min_cost_matching(
-                iou_matching.iou_cost, self.max_iou_distance, self.tracks,
-                detections, iou_track_candidates, unmatched_detections)
+            linear_assignment.min_cost_matching(iou_matching.iou_cost, 
+                                                self.max_iou_distance, 
+                                                self.tracks,
+                                                detections, 
+                                                iou_track_candidates, 
+                                                unmatched_detections)
 
         matches = matches_a + matches_b
         unmatched_tracks = list(set(unmatched_tracks_a + unmatched_tracks_b))
         return matches, unmatched_tracks, unmatched_detections
 
     def _initiate_track(self, detection):
-        if detection.cls not in self.seen:
-            self.seen[detection.cls]=1
-        track_id_cls = self.seen[detection.cls]
         mean, covariance = self.kf.initiate(detection.to_xyah())
-        self.tracks.append(Track(
-            mean, covariance, self._next_id, track_id_cls, self.n_init, self.max_age,
-            detection.feature, detection.cls))
+        self.tracks.append(Track(mean, 
+                                covariance, 
+                                self._next_id, 
+                                self.n_init, 
+                                self.max_age,
+                                detection.feature, 
+                                detection.cls))
         self._next_id += 1
-        self.seen[detection.cls]+=1
