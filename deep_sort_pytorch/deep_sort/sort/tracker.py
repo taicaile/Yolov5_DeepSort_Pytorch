@@ -102,8 +102,10 @@ class Tracker:
         def gated_metric(tracks, dets, track_indices, detection_indices):
             features = np.array([dets[i].feature for i in detection_indices])
             targets = np.array([tracks[i].track_id for i in track_indices])
-
+            # features.shape : (10,512)
+            # targets.shape : (9,)
             cost_matrix = self.metric.distance(features, targets)
+            # cost_matrix.shape : (9,10), 9 is track indices, 10 is detection indices
             cost_matrix = linear_assignment.gate_cost_matrix(self.kf, 
                                                              cost_matrix, 
                                                              tracks, 
@@ -113,8 +115,13 @@ class Tracker:
             return cost_matrix
 
         # Split track set into confirmed and unconfirmed tracks.
-        confirmed_tracks = [i for i, t in enumerate(self.tracks) if t.is_confirmed()]
-        unconfirmed_tracks = [i for i, t in enumerate(self.tracks) if not t.is_confirmed()]
+        confirmed_tracks = []
+        unconfirmed_tracks = []
+        for i,t in enumerate(self.tracks):
+            if t.is_confirmed():
+                confirmed_tracks.append(i)
+            else:
+                unconfirmed_tracks.append(i)
 
         # Associate confirmed tracks using appearance features.
         matches_a, unmatched_tracks_a, unmatched_detections = \
