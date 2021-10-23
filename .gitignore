@@ -3,3 +3,4 @@ venv
 inference
 __pycache__
 *.pyc
+*.mp4
